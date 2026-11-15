@@ -1,0 +1,13 @@
+"compatibilitytools"
+{
+  "compat_tools"
+  {
+    "bridgeplay-proton-fh6-mgf"
+    {
+      "install_path" "."
+      "display_name" "MGF WineCX 11.17 (FH6, MacGameFix exception chain)"
+      "from_oslist" "windows"
+      "to_oslist" "macos"
+    }
+  }
+}

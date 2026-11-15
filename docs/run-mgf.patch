@@ -1,0 +1,81 @@
+# Diff of the MGF Steam tool's run against Bridgeplay's bridgeplay-proton-winecx-11.17 run (stock sha256 5cda511053411296...).
+# Bridgeplay by raymondchins (GPL-3.0, https://github.com/raymondchins/Bridgeplay, a fork of NotProton). Our edits are marked '# MGF:'.
+# Credits for the edits: MacGameFix (MathiasKowoll, GPL-3.0, commit 881f3a96) and Highball tweak concrt140-native (Gauthier Piarrette, highball-db, CC0).
+2c2
+< # bridgeplay CrossOver compatibility tool shim
+---
+> # bridgeplay-compatible custom tool shim (FH6 build, based on Bridgeplay run; not written by Bridgeplay)
+162,163c162,163
+< if [ -n "$np_tool_dir" ] && [ -r "$np_tool_dir/flavor" ]; then
+<   read -r np_flavor < "$np_tool_dir/flavor" || np_flavor=""
+---
+> if [ -n "$np_tool_dir" ] && [ -r "$np_tool_dir/tool-flavor" ]; then
+>   read -r np_flavor < "$np_tool_dir/tool-flavor" || np_flavor=""
+3112a3113,3133
+> fi
+> # MGF: native Microsoft VC++ runtime first (Highball tweak concrt140-native: Wine's builtin concrt140
+> # concurrent_vector race crashes FH6, FHE21). Same list as the FH-fex tool. Credit: Highball/highball-db.
+> # MGF: LAUNCH-OPTION DEFAULTS. Bridgeplay's hook passes launch options as environment variables (`VAR=value %command%`, run through
+> # MGF: /bin/sh). Every value this tool sets itself goes through opt_default (or ${VAR:-default}), so a launch option always wins; an empty
+> # MGF: value counts as not set. The log (graphics: lines in bridgeplay-run.log) says "<VAR> from launch options" or "<VAR> default".
+> opt_default() {
+>   eval "opt_cur=\${$1:-}"
+>   if [ -n "$opt_cur" ]; then
+>     graphics_log "$1 from launch options: $opt_cur"
+>   else
+>     export "$1=$2"
+>     graphics_log "$1 default: $2"
+>   fi
+> }
+> # MGF: DLL overrides compose, they do not replace. Order in WINEDLLOVERRIDES: backend, this tool's defaults, the gamefix conf, then the
+> # MGF: launch options (WINEDLLOVERRIDES=..., or BRIDGEPLAY_DLLOVERRIDES=..., which is appended after it). Wine takes the LAST entry for a
+> # MGF: DLL, so the launch options win per DLL and every other default stays: BRIDGEPLAY_DLLOVERRIDES='concrt140=b' only touches concrt140.
+> if [ -n "${BRIDGEPLAY_DLLOVERRIDES:-}" ]; then
+>   WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}$BRIDGEPLAY_DLLOVERRIDES"
+>   graphics_log "BRIDGEPLAY_DLLOVERRIDES from launch options (wins per DLL): $BRIDGEPLAY_DLLOVERRIDES"
+3113a3135,3142
+> # MGF: MGF_MSVC_OVERRIDES replaces just this default entry; a launch-option DLL override for the same DLL still wins after it.
+> if [ -n "${MGF_MSVC_OVERRIDES:-}" ]; then
+>   graphics_log "MGF_MSVC_OVERRIDES from launch options: $MGF_MSVC_OVERRIDES"
+> else
+>   graphics_log "MGF_MSVC_OVERRIDES default: concrt140=n,b"
+> fi
+> mgf_msvc="${MGF_MSVC_OVERRIDES:-concrt140=n,b}"  # narrowed: full native msvcp/vcruntime set lost dialogue audio
+> gamefix_dlloverrides="$mgf_msvc${gamefix_dlloverrides:+;$gamefix_dlloverrides}"
+3444a3474,3489
+> # MGF: Rosetta trap boost. Credit: MacGameFix (MathiasKowoll, GPL-3.0, commit 881f3a96), fixes/notproton-rosetta-trap-boost.dylib
+> # MGF: sha256 ce9dd6b0d23f350529cbc428a8b96c5b99ad7ba548ee750af82636671d118672, source engine/sources/fh6-20261111/rosetta-trap-boost.c.
+> # MGF: On by default for this tool. Off with MGF_TRAP_BOOST=0 in Steam's environment or by creating mgf-trap-boost.off next to this script.
+> mgf_boost=""
+> if [ -n "${MGF_TRAP_BOOST:-}" ]; then
+>   graphics_log "MGF_TRAP_BOOST from launch options: $MGF_TRAP_BOOST"
+> else
+>   graphics_log "MGF_TRAP_BOOST default: 1"
+> fi
+> if [ "${MGF_TRAP_BOOST:-1}" != 0 ] && [ ! -e "$np_tool_dir/mgf-trap-boost.off" ] \
+>   && [ -f "$np_tool_dir/notproton-rosetta-trap-boost.dylib" ] && [ "${wine_unix##*/}" = x86_64-unix ]; then
+>   mgf_boost="$np_tool_dir/notproton-rosetta-trap-boost.dylib"
+>   echo "=== MGF: Rosetta trap boost will be injected from $mgf_boost ===" >> "$log" 2>&1 || true
+> else
+>   echo "=== MGF: Rosetta trap boost is off ===" >> "$log" 2>&1 || true
+> fi
+3466a3512,3516
+> # MGF: append the Rosetta trap boost to whatever the overlay logic above inserted (same DYLD channel).
+> mgf_boost="$mgf_boost"
+> if [ -n "\$mgf_boost" ] && [ -f "\$mgf_boost" ]; then
+>   export DYLD_INSERT_LIBRARIES="\${DYLD_INSERT_LIBRARIES:+\$DYLD_INSERT_LIBRARIES:}\$mgf_boost"
+> fi
+3572a3623,3635
+> # MGF: MacGameFix exception chain for Forza Horizon 6, enabled through the NOTPROTON_ENV_ channel below.
+> # MGF: Credit: MacGameFix by MathiasKowoll (https://github.com/MathiasKowoll/MacGameFix, GPL-3.0, commit 881f3a96),
+> # MGF: paired ntdll 27.0.0.41073 (CodeWeavers CrossOver / Wine, LGPL-2.1+); the three switches are the ones its
+> # MGF: installer sets for the 41073 runner. The game process gets WINE_SOFTWARE_EXCEPTION_CHAIN=1 etc.
+> # MGF: Checked by ntdll against forzahorizon6.exe's PE header, so other games ignore them.
+> # MGF: Each is a default: a launch option such as NOTPROTON_ENV_WINE_SOFTWARE_EXCEPTION_CHAIN=0 %command% wins and is logged.
+> opt_default NOTPROTON_ENV_WINE_SOFTWARE_EXCEPTION_CHAIN 1
+> opt_default NOTPROTON_ENV_WINE_SOFTWARE_ALU_BRIDGE 1
+> opt_default NOTPROTON_ENV_WINE_SOFTWARE_BRIDGE_RESUME 0
+> # MGF: EXCEPTION_STATS=1 keeps the in-memory counters on (ntdll default, set explicitly for the test).
+> opt_default NOTPROTON_ENV_WINE_SOFTWARE_EXCEPTION_STATS 1
+> # MGF: Metal HUD overlay for frame time checks; MTL_ is forwarded by the loop below.
+> # MGF: Metal HUD removed (it hides Bridgeplay's own overlay; user prefers Bridgeplay summary)
