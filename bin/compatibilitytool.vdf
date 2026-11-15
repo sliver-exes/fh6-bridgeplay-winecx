@@ -1,0 +1,13 @@
+"compatibilitytools"
+{
+  "compat_tools"
+  {
+    "bridgeplay-proton-fh6-fex"
+    {
+      "install_path" "."
+      "display_name" "FH WineFEX 11.18 arm64 (Highball r3, vkd3d)"
+      "from_oslist" "windows"
+      "to_oslist" "macos"
+    }
+  }
+}

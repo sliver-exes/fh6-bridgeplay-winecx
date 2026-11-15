@@ -1,0 +1,227 @@
+--- bridgeplay-proton-winecx-11.17/run (Bridgeplay 0.7.64, stock)
++++ bridgeplay-proton-fh6-fex/run (bin/run)
+@@ -1,5 +1,14 @@
+ #!/bin/sh
+-# bridgeplay CrossOver compatibility tool shim
++# Steam compatibility tool "FH WineFEX 11.18 arm64 (Highball r3, vkd3d)" for Forza Horizon 6.
++#
++# Derived from the `run` script of Bridgeplay's WineCX 11.17 tool (bridgeplay-proton-winecx-11.17),
++# Bridgeplay by raymondchins, GPL-3.0, https://github.com/raymondchins/Bridgeplay, itself a fork of
++# NotProton. Every edit we made is marked with a "# FH-fex:" comment; the full diff is docs/run-fex.patch.
++# The settings it applies for app 2483190 come from the Forza Horizon 6 recipe of Highball by
++# Gauthier Piarrette (GPL-3.0, https://github.com/gauthierpiarrette/highball; recipes and database
++# CC0, https://github.com/gauthierpiarrette/highball-db). The Wine arm64 + FEX + KosmicKrisp engine
++# it launches is Highball's (https://github.com/gauthierpiarrette/highball-engine). This file stays
++# bridgeplay-compatible custom tool shim (FH6 build, based on Bridgeplay run; not written by Bridgeplay)
+ set -e
+ 
+ verb="$1"
+@@ -159,8 +168,8 @@
+ np_build=""
+ CDPATH=''
+ np_tool_dir=$(cd -- "$(dirname -- "$0")" 2>/dev/null && pwd) || np_tool_dir=""
+-if [ -n "$np_tool_dir" ] && [ -r "$np_tool_dir/flavor" ]; then
+-  read -r np_flavor < "$np_tool_dir/flavor" || np_flavor=""
++if [ -n "$np_tool_dir" ] && [ -r "$np_tool_dir/tool-flavor" ]; then
++  read -r np_flavor < "$np_tool_dir/tool-flavor" || np_flavor=""
+ fi
+ if [ -n "$np_tool_dir" ] && [ -r "$np_tool_dir/build" ]; then
+   read -r np_build < "$np_tool_dir/build" || np_build=""
+@@ -206,6 +215,87 @@
+   fex_from=environment
+   [ -n "${FEX_X87REDUCEDPRECISION+x}" ] || fex_from=default
+   export FEX_X87REDUCEDPRECISION="${FEX_X87REDUCEDPRECISION-1}"
++  # FH-fex: Highball arm64 engine (Wine 11.18 + FEX + KosmicKrisp Vulkan + baked vkd3d-proton).
++  # Only when this runner ships the KosmicKrisp ICD, so the stock arm64 runners are untouched.
++  # Each default is skipped when the variable already exists, so launch options still win.
++  if [ -f "$CX_ROOT/renderers/kosmickrisp/kosmickrisp_icd.json" ]; then
++    # FH-fex: LAUNCH-OPTION DEFAULTS. Launch options reach this script as environment variables
++    # (`VAR=value %command%`); every value below applies only when the variable is unset or empty, and
++    # fh_fex_env records which one applied. The run log is not open yet, so the notes are kept in
++    # fh_fex_notes and written next to the "fex:" line further down.
++    fh_fex_notes=""
++    fh_fex_env() {
++      eval "fh_cur=\${$1:-}"
++      if [ -n "$fh_cur" ]; then
++        fh_fex_notes="$fh_fex_notes$1 from launch options: $fh_cur
++"
++      else
++        export "$1=$2"
++        fh_fex_notes="$fh_fex_notes$1 default: $2
++"
++      fi
++    }
++    fh_gst="$CX_ROOT/frameworks/GStreamer.framework/Versions/1.0/lib"
++    # FH-fex: dyld fallback paths for libMoltenVK, GStreamer and friends. Forwarded to Wine by
++    # the --env allow-list below (the launcher runs under env -i).
++    fh_fex_env DYLD_FALLBACK_LIBRARY_PATH "$CX_ROOT/lib:$CX_ROOT/frameworks:$fh_gst"
++    fh_fex_env DYLD_FALLBACK_FRAMEWORK_PATH "$CX_ROOT/frameworks"
++    fh_fex_env GST_PLUGIN_PATH "$fh_gst/gstreamer-1.0"
++    # FH-fex: Vulkan goes straight to KosmicKrisp; no implicit layers (Steam overlay etc).
++    fh_fex_env VK_DRIVER_FILES "$CX_ROOT/renderers/kosmickrisp/kosmickrisp_icd.json"
++    fh_fex_env VK_LOADER_LAYERS_DISABLE '~implicit~'
++    # FH-fex: Mesa/KosmicKrisp shader cache outside the prefix, so a prefix swap or rebuild keeps it
++    # warm. A MESA_SHADER_CACHE_DIR launch option still wins.
++    fh_fex_env MESA_SHADER_CACHE_DIR "$HOME/Library/Caches/fh6-kk-mesa"
++    # FH-fex: vkd3d-proton shader cache directory (default is the game folder, which Steam may wipe).
++    # Z:/ path because vkd3d-proton opens it from inside Wine. A VKD3D_SHADER_CACHE_PATH launch option wins.
++    fh_fex_env VKD3D_SHADER_CACHE_PATH "Z:$HOME/Library/Caches/fh6-vkd3d"
++    fh_fex_env MESA_SHADER_CACHE_MAX_SIZE 4G
++    fh_fex_env VKD3D_RELAX_DEVICE_CAPS 1
++    fh_fex_env DXVK_RELAX_FEATURES 1
++    # FH-fex: Forza Horizon 6 (Steam app 2483190), Highball recipe previewRoute
++    # (arm64-kk-wine11.18-r3, renderer vkd3d, Apple M4 / 32 GB, 1080p 30 fps).
++    fh_fex_overrides=""
++    if [ "${STEAM_COMPAT_APP_ID:-}" = 2483190 ]; then
++      fh_fex_env HB_FEX_FAST_LEGACY_UD 1
++      fh_fex_env HB_FEX_FAST_PREFIX_UD 1
++      fh_fex_env HB_FEX_DIRECT_SIGILL 1
++      fh_fex_env HB_FEX_SMC_GRAVE_SETS 16384
++      fh_fex_env HB_FEX_SMC_INLINE 1
++      fh_fex_env HB_FEX_SMC_INLINE_MS 10000
++      fh_fex_env HB_FEX_SMC_INLINE_RETIRE_PROT 1
++      fh_fex_env HB_FEX_SMC_INLINE_RETIRE_FREE 1
++      fh_fex_env HB_FEX_SMC_INLINE_RETIRE_UNMAP 1
++      fh_fex_env HB_FEX_SMC_INLINE_KEEP_READ 1
++      fh_fex_env HB_FEX_SMC_INLINE_BLOCK_REMOVE 1
++      fh_fex_env HB_FEX_PRIVATE_CHURN 20000
++      fh_fex_env HB_DIRECT_CONTINUE 1
++      fh_fex_env HB_FEX_MAPJIT 1
++      fh_fex_env HB_FEX_SMC_RETIRE 1
++      fh_fex_env HB_FEX_SMC_REINSTATE 1
++      fh_fex_env HB_FEX_SMC_RETIRE_FAULTS 1
++      fh_fex_env HB_FEX_CALLRET_EPOCH 1
++      fh_fex_env HB_FEX_SMC_CACHE_FILTER 1
++      fh_fex_env HB_FEX_SMC_REPLAY 0
++      fh_fex_env HB_KK_NO_UBO_ROBUST 1
++      fh_fex_env FEX_SMCCHECKS mtrack
++      fh_fex_env FEX_DISKCACHE 0
++      fh_fex_env VKD3D_FEATURE_LEVEL 12_1
++      fh_fex_env VKD3D_SHADER_MODEL 6_6
++      fh_fex_env VKD3D_CONFIG no_staggered_submit
++      fh_fex_env VKD3D_DEBUG err
++      fh_fex_env DXVK_LOG_LEVEL warn
++      # FH-fex: recipe's ${memoryMB*0.375}, computed here: 3/8 of physical RAM in MB.
++      fh_mem_mb=$(( $(sysctl -n hw.memsize) / 1048576 ))
++      # FH-fex: 4096 MB budget (16 GB Mac profile: real Metal allocation ~2x the budget; 6144 swapped); device memory 4096 too: the game sizes its allocations from DedicatedVideoMemory (vkd3d ignores the budget), so the low-VRAM warning is expected
++      fh_fex_env DXVK_CONFIG "dxgi.maxVideoMemoryBudget=4096;dxgi.maxDeviceMemory=4096;dxgi.maxSharedMemory=4096;dxgi.customVendorId=8086;dxgi.customDeviceId=56a1;dxgi.customDeviceDesc=\"Intel(R) Arc(TM) A750 Graphics\""
++      # FH-fex: recipe dlloverrides. Overlay renderer disabled; MSVC runtime native first.
++      fh_fex_overrides="gameoverlayrenderer64,gameoverlayrenderer=d;concrt140,msvcp140,msvcp140_1,msvcp140_2,msvcp140_atomic_wait,msvcp140_codecvt_ids,vccorlib140,vcomp140,vcruntime140,vcruntime140_1=n,b"
++    fi
++    # FH-fex: the vkd3d-proton DLLs are baked into lib/wine/aarch64-windows as builtins, so
++    # force builtin; "n,b" would let a stray native copy in the prefix win.
++    fh_fex_overrides="${fh_fex_overrides:+$fh_fex_overrides;}dxgi,d3d11,d3d10core,d3d12,d3d12core=b"
++  fi
+ else
+   avx_from=environment
+   [ -n "$ROSETTA_ADVERTISE_AVX" ] || avx_from=default
+@@ -3067,6 +3157,8 @@
+   echo "sync: WINEMSYNC=$WINEMSYNC from $msync_from" >> "$log" 2>&1 || true
+   if [ "${wine_unix##*/}" = aarch64-unix ]; then
+     echo "fex: FEX_X87REDUCEDPRECISION=$FEX_X87REDUCEDPRECISION from $fex_from" >> "$log" 2>&1 || true
++    # FH-fex: which launch option or default applied for each FEX/Vulkan/vkd3d/DXVK setting (see fh_fex_env).
++    [ -z "${fh_fex_notes:-}" ] || printf '%s' "$fh_fex_notes" | sed 's/^/FH-fex: /' >> "$log" 2>&1 || true
+   else
+     echo "avx: ROSETTA_ADVERTISE_AVX=$ROSETTA_ADVERTISE_AVX from $avx_from" >> "$log" 2>&1 || true
+   fi
+@@ -3110,8 +3202,30 @@
+   esac
+ else
+   graphics_log "backend=$backend ($backend_from)"
++fi
++# FH-fex: runner DLL overrides go first (set at the top of this script), so the gamefix conf
++# and launch options, which compose_dll_overrides appends after them, still win.
++[ -z "${fh_fex_overrides:-}" ] || gamefix_dlloverrides="$fh_fex_overrides${gamefix_dlloverrides:+;$gamefix_dlloverrides}"
++# FH-fex: DLL overrides compose, they do not replace. Order: backend, runner defaults (above), gamefix conf, the forced graphics
++# FH-fex: entry below, then the launch options (WINEDLLOVERRIDES=..., or BRIDGEPLAY_DLLOVERRIDES=..., appended after it). Wine takes the
++# FH-fex: LAST entry per DLL, so the launch options win per DLL and every other default stays.
++fh_user_dlo="${WINEDLLOVERRIDES:-}"
++if [ -n "${BRIDGEPLAY_DLLOVERRIDES:-}" ]; then
++  fh_user_dlo="${fh_user_dlo:+$fh_user_dlo;}$BRIDGEPLAY_DLLOVERRIDES"
+ fi
++unset WINEDLLOVERRIDES
+ compose_dll_overrides
++# FH-fex: the per-game gamefix conf is shared with the Rosetta runner (FH6's says d3d12=n,b to
++# load the D3DMetal proxy from the game folder). On arm64 the graphics DLLs default to the
++# baked vkd3d-proton builtins, placed after the gamefix conf and before the launch options.
++if [ "${wine_unix##*/}" = aarch64-unix ]; then
++  export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}dxgi,d3d11,d3d10core,d3d12,d3d12core=b"
++  graphics_log "FH-fex: DLL override dxgi,d3d11,d3d10core,d3d12,d3d12core default: b (launch-option WINEDLLOVERRIDES wins per DLL)"
++fi
++if [ -n "$fh_user_dlo" ]; then
++  export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}$fh_user_dlo"
++  graphics_log "WINEDLLOVERRIDES from launch options (wins per DLL): $fh_user_dlo"
++fi
+ [ -z "$backend_overrides" ] || graphics_log "backend overrides $backend_overrides"
+ 
+ bridge_src="$np_support/bridge"
+@@ -3442,15 +3556,35 @@
+   echo "loader staging failed, game mode unavailable" >> "$log" 2>&1 || true
+ fi
+ 
++# FH-fex: DYLD_* never survives the SIP-protected /usr/bin/env or /bin/sh (so the env-forwarding
++# loop above cannot see or carry it), so the launcher exports the dyld fallback paths itself,
++# just before it starts the hardened-runtime loader (allow-dyld-environment-variables).
++fh_launcher_dyld=""
++# FH-fex perf overlay: the arm64 loader cannot take DYLD_INSERT_LIBRARIES (any non-empty value
++# makes Wine fail with c0000018), so the launcher leaves it unset and lsteamclient dlopens the
++# shim once Wine is up (its load_overlay_libraries, which reads STEAM_DYLD_INSERT_LIBRARIES).
++fh_late_shim=0
++[ "${wine_unix##*/}" = aarch64-unix ] && fh_late_shim=1
++if [ -n "${DYLD_FALLBACK_LIBRARY_PATH:-}" ]; then
++  fh_launcher_dyld="export DYLD_FALLBACK_LIBRARY_PATH=\"$DYLD_FALLBACK_LIBRARY_PATH\"
++export DYLD_FALLBACK_FRAMEWORK_PATH=\"$DYLD_FALLBACK_FRAMEWORK_PATH\""
++fi
+ cat > "$loader_macos/launcher" <<LAUNCHER
+ #!/bin/sh
+ export WINELOADER="$WINELOADER"
++$fh_launcher_dyld
+ wine_log="$loader_root/bridgeplay-wine.log"
+ exec > "\$wine_log" 2>&1
+ shim="$np_support/overlay-shim.dylib"
+ # Off as np-native's is_off reads it: unset, 0, off, false or no, in any case
+ wants() { case "\$1" in ''|0|[Oo][Ff][Ff]|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]) return 1 ;; esac; }
+-if [ -n "\$STEAM_DYLD_INSERT_LIBRARIES" ]; then
++if [ "$fh_late_shim" = 1 ]; then
++  # FH-fex: no DYLD_INSERT_LIBRARIES. Performance overlay only: no quick settings, no Cmd-Q hook.
++  if [ -f "\$shim" ] && { wants "\$NOTPROTON_PERF_OVERLAY" || wants "\$NOTPROTON_SCALING_FILTER"; }; then
++    export NOTPROTON_OVERLAY_SHIM="\$shim" STEAM_DYLD_INSERT_LIBRARIES="\$shim"
++    export NOTPROTON_QUICK_SETTINGS=0 BRIDGEPLAY_COMMAND_Q=0
++  fi
++elif [ -n "\$STEAM_DYLD_INSERT_LIBRARIES" ]; then
+   if [ -f "\$shim" ]; then
+     export DYLD_INSERT_LIBRARIES="\$shim:\$STEAM_DYLD_INSERT_LIBRARIES"
+     export NOTPROTON_OVERLAY_SHIM="\$shim"
+@@ -3565,13 +3699,31 @@
+   set -- "$@" $gamefix_args
+   echo "gamefix: game arguments are now: $*" >> "$log" 2>&1 || true
+ fi
++# FH-fex: the Highball arm64 loader must map Wine's shared user data at a fixed address;
++# dylibs injected into it (Steam overlay, notproton overlay shim) take that range and Wine
++# dies with "failed to map the shared user data: c0000018". Highball injects nothing.
++if [ "${wine_unix##*/}" = aarch64-unix ]; then
++  [ -z "$STEAM_DYLD_INSERT_LIBRARIES" ] || echo "FH-fex: Steam overlay injection disabled on arm64" >> "$log" 2>&1 || true
++  STEAM_DYLD_INSERT_LIBRARIES=""
++  # FH-fex: off by default only; NOTPROTON_PERF_OVERLAY / NOTPROTON_FRAMEGEN from the launch options win, but the shim they load is
++  # FH-fex: an injected dylib, which is exactly what makes Wine die here: expect c0000018 if you turn them on.
++  for fh_ov in NOTPROTON_PERF_OVERLAY NOTPROTON_FRAMEGEN; do
++    eval "fh_cur=\${$fh_ov:-}"
++    if [ -n "$fh_cur" ]; then
++      echo "FH-fex: $fh_ov from launch options: $fh_cur" >> "$log" 2>&1 || true
++    else
++      export "$fh_ov=0"
++      echo "FH-fex: $fh_ov default: 0" >> "$log" 2>&1 || true
++    fi
++  done
++fi
+ if [ -n "$STEAM_DYLD_INSERT_LIBRARIES" ]; then
+   echo "=== overlay injected from $STEAM_DYLD_INSERT_LIBRARIES ===" >> "$log" 2>&1 || true
+ else
+   echo "=== client staged no overlay renderer, overlay disabled ===" >> "$log" 2>&1 || true
+ fi
+ set -- --args "$shim_exe" "$@"
+-for name in $(env | LC_ALL=C sed -nE 's/^(CX_APPLEGPTK_LIBD3DSHARED_PATH|SDL_GAMECONTROLLERCONFIG(_FILE)?|SDL_JOYSTICK_MFI|WINE_LARGE_ADDRESS_AWARE|WINE_CPU_TOPOLOGY|CX_FWD_COMPAT_GL_CTX|Steam[A-Za-z0-9]*|(CX_GRAPHICS|D3DM_|DXMT_|DXVK_|FEX_|MVK_|VKD3D_|STAGING_|MTL_|ROSETTA_)[A-Z0-9_]*|NOTPROTON_FRAMEGEN(_[A-Z]+)?|NOTPROTON_PERF_OVERLAY|NOTPROTON_FPS_LIMIT(_OFF)?|NOTPROTON_SCALING_FILTER|NOTPROTON_QUICK_SETTINGS|NOTPROTON_NGX_SIGNER|NOTPROTON_NVAPI_DRIVER|NOTPROTON_DRIVER_VERSION|NOTPROTON_STDOUT_NULL|NOTPROTON_VSYNC|NOTPROTON_HIDE_WINE_EXPORTS|NOTPROTON_ROCKSTAR_DXGI|CX_ACTIVE_GRAPHICS_BACKEND)=.*/\1/p'); do
++for name in $(env | LC_ALL=C sed -nE 's/^(CX_APPLEGPTK_LIBD3DSHARED_PATH|SDL_GAMECONTROLLERCONFIG(_FILE)?|SDL_JOYSTICK_MFI|WINE_LARGE_ADDRESS_AWARE|WINE_CPU_TOPOLOGY|CX_FWD_COMPAT_GL_CTX|Steam[A-Za-z0-9]*|(CX_GRAPHICS|D3DM_|DXMT_|DXVK_|FEX_|MVK_|VKD3D_|STAGING_|MTL_|ROSETTA_|HB_|VK_|MESA_|GST_)[A-Z0-9_]*|DYLD_FALLBACK_(LIBRARY|FRAMEWORK)_PATH|NOTPROTON_FRAMEGEN(_[A-Z]+)?|NOTPROTON_PERF_OVERLAY|NOTPROTON_FPS_LIMIT(_OFF)?|NOTPROTON_SCALING_FILTER|NOTPROTON_QUICK_SETTINGS|NOTPROTON_NGX_SIGNER|NOTPROTON_NVAPI_DRIVER|NOTPROTON_DRIVER_VERSION|NOTPROTON_STDOUT_NULL|NOTPROTON_VSYNC|NOTPROTON_HIDE_WINE_EXPORTS|NOTPROTON_ROCKSTAR_DXGI|CX_ACTIVE_GRAPHICS_BACKEND)=.*/\1/p'); do
+   eval "value=\$$name"
+   # shellcheck disable=SC2154 # eval assigns value on the line above
+   set -- --env "$name=$value" "$@"
