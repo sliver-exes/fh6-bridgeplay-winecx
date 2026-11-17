@@ -6,6 +6,8 @@
 # Credits (full list in bin/CREDITS.md and README.md):
 #   d3d12 proxy: sliver-exes/fh5-d3dmetal-fix (GPL-3.0), built on tsshim from Highball by Gauthier
 #     Piarrette (GPL-3.0). https://github.com/sliver-exes/fh5-d3dmetal-fix
+#   --pacer proxy (d3d12-fh6.dll, Rosetta frame pacer): MacGameFix main @ ef19e41 (PR #89), by MathiasKowoll
+#     (GPL-3.0), itself based on the Highball tsshim and xvferxedd/fh5-d3dmetal-fix. Unchanged by us.
 #   MacGameFix by MathiasKowoll (GPL-3.0, Wine modules LGPL-2.1+), commit 881f3a96: the 27.0.0.41073 ntdll.dll
 #     (exception chain, ALU bridge) and notproton-rosetta-trap-boost.dylib. https://github.com/MathiasKowoll/MacGameFix
 #   Highball by Gauthier Piarrette: patch 0057 spatial mixer (TxCsOffc, PR #313, LGPL-2.1) and the concrt140 tweak.
@@ -14,9 +16,11 @@
 #   Wine / CodeWeavers CrossOver Wine (LGPL-2.1+); Apple D3DMetal (not shipped, used from your Bridgeplay install).
 # This file: sliver-exes, GPL-3.0.
 #
-# Usage: ./install.sh [-y] [--plain] [--experimental-ntdll]
+# Usage: ./install.sh [-y] [--plain] [--pacer] [--experimental-ntdll]
 #   -y                    answer yes to every question (quits Steam, starts the game once if there is no prefix)
 #   --plain               only the old plain D3DMetal-proxy route (plain tool only, no MGF runner/tool)
+#   --pacer               use MacGameFix's d3d12 proxy with the Rosetta frame pacer instead of the plain proxy
+#                         (MGF route only; run again without --pacer to go back)
 #   --experimental-ntdll  plain route only: also install the unwind-patched ntdll.dll (did not fix FHE21)
 # Default route: one MGF runner + bridge + Steam tool. Only one route stays installed (the other one's copies,
 # which are ours and never Bridgeplay's stock files, are removed).
@@ -26,13 +30,14 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib.sh
 . "$HERE/lib.sh"
 
-FH_YES=0; EXP_NTDLL=0; PLAIN=0
+FH_YES=0; EXP_NTDLL=0; PLAIN=0; PACER=0
 for a in "$@"; do
   case $a in
     -y|--yes) FH_YES=1 ;;
     --experimental-ntdll) EXP_NTDLL=1 ;;
     --plain) PLAIN=1 ;;
-    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --pacer) PACER=1 ;;
+    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option $a (try --help)" ;;
   esac
 done
@@ -49,6 +54,7 @@ ok "Apple Silicon, python3"
 bad=$(cd "$HERE/bin" && while read -r h f; do [ -n "$h" ] || continue; [ "$(sha "$f")" = "$h" ] || echo "$f"; done < SHA256SUMS)
 [ -z "$bad" ] || die "files in bin/ do not match bin/SHA256SUMS: $bad (re-clone the repo)"
 [ "$(sha "$HERE/bin/d3d12.dll")" = "$PROXY_SHA" ] || die "bin/d3d12.dll is not the expected proxy build."
+[ "$(sha "$HERE/bin/d3d12-fh6.dll")" = "$PACER_SHA" ] || die "bin/d3d12-fh6.dll is not the expected pacer proxy build."
 ok "bin/ files match SHA256SUMS (proxy sha256 $(printf %.8s "$PROXY_SHA")...)"
 
 [ -d "$BP" ] || die "Bridgeplay is not installed. Get it from https://github.com/raymondchins/Bridgeplay/releases, open it once, and install its WineCX 11.17 runner."
@@ -210,8 +216,17 @@ if [ -f "$GAMEFIX" ] && ! cmp -s "$TMP/gamefix.conf" "$GAMEFIX" && [ ! -e "$GAME
 fi
 cp "$TMP/gamefix.conf" "$GAMEFIX"
 ok "gamefixes/$APPID.conf"
-cp "$HERE/bin/d3d12.dll" "$GAME/d3d12.dll"
-ok "proxy d3d12.dll in the game folder"
+if [ "$PACER" = 1 ] && [ "$PLAIN" = 1 ]; then
+  warn "--pacer belongs to the MGF route; ignored with --plain"; PACER=0
+fi
+if [ "$PACER" = 1 ]; then
+  cp "$HERE/bin/d3d12-fh6.dll" "$GAME/d3d12.dll"
+  ok "pacer proxy d3d12.dll (MacGameFix d3d12-fh6) in the game folder"
+  info "Add NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER=40 to the launch options to switch the pacer on (see README)."
+else
+  cp "$HERE/bin/d3d12.dll" "$GAME/d3d12.dll"
+  ok "proxy d3d12.dll in the game folder"
+fi
 
 # ---- 3. Steam compatibility tool ----------------------------------------------------------------
 # set_mapping: Forza Horizon 6 uses the tool of the chosen route. Sets MANUAL=1 if it cannot be done safely.

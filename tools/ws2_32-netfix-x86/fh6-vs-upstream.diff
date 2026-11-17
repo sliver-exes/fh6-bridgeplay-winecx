@@ -1,0 +1,139 @@
+--- fh5-netfix.c.upstream	2026-11-14 23:36:20
++++ fh6-netfix.c	2026-11-14 23:36:20
+@@ -1,13 +1,32 @@
+ /*
+- * Forza Horizon 5 Xbox UDP compatibility proxy.
++ * Forza Horizon 6 Xbox UDP compatibility proxy (Wine / Bridgeplay FEX route).
+  *
+- * Wine does not implement SIO_UDP_NETRESET, and macOS rejects IPv4 socket
+- * options applied to a dual-stack IPv6 socket. FH5 treats either failure as a
+- * reason to close its Xbox UDP socket. This proxy forwards ws2_32 to a renamed
+- * copy, ws2_o.dll, and changes only those two results to match Windows.
++ * Wine does not implement SIO_UDP_NETRESET, and macOS rejects IPv4-level socket
++ * options (IP_DONTFRAGMENT, IP_TTL, ...) applied to a dual-stack IPv6 socket.
++ * The game creates an AF_INET6 UDP socket (IPV6_V6ONLY=0) bound to [::]:3074 and
++ * closes it and retries when any of these calls fails. This proxy forwards
++ * ws2_32 to a renamed copy, ws2_o.dll, and changes only those results to match
++ * Windows.
+  *
+- * Derived from xvferxedd/fh5-d3dmetal-fix at ebd20dbe, recovered by
+- * Andytizer/fh5-crossover-steam-fix v1.0.1. GPL-3.0.
++ * CREDITS (all upstreams, GPL-3.0):
++ *   - xvferxedd/fh5-d3dmetal-fix, commit ebd20dbe: original FH5 ws2_32 proxy.
++ *   - Andytizer/fh5-crossover-steam-fix v1.0.1: recovered the proxy and the
++ *     pe.pl export-rename helper.
++ *   - MathiasKowoll/MacGameFix fixes/fh5-netfix.c (+ build-fh5-netfix.sh,
++ *     pe.py, pe.pl): source-built version this file is copied from.
++ *
++ * CHANGES FOR FORZA HORIZON 6 (this file, 2026-11-14):
++ *   - IPPROTO_IP options that fail (any option, not only the known four) on a
++ *     tracked UDP socket created as AF_INET6/AF_UNSPEC now get the IPv6
++ *     equivalent applied where one exists (IP_TTL -> IPV6_UNICAST_HOPS,
++ *     IP_DONTFRAGMENT -> IPV6_DONTFRAG, IP_MULTICAST_TTL/LOOP, IP_TOS) and are
++ *     then reported as success. Sockets of other families are forwarded
++ *     unchanged, so a genuine IPv4 failure is never hidden.
++ *   - Sockets remember their address family for the check above.
++ *   - Log file is fh6-netfix.log (enabled by MGF_FH5_NETLOG=1; the fix itself
++ *     can be switched off with MGF_FH5_NETFIX=0). Env names kept from upstream.
++ *   - Built as an x64 PE to sit in front of the ARM64X builtin ws2_32 of the
++ *     crossover-FH-fex runner (loaded by the FEX-emulated x64 game only).
+  */
+ 
+ #include <winsock2.h>
+@@ -16,6 +35,12 @@
+ #include <stddef.h>
+ 
+ #define SIO_UDP_NETRESET_ 0x9800000FUL
++#ifndef IP_DONTFRAGMENT
++#define IP_DONTFRAGMENT 14
++#endif
++#ifndef IPV6_DONTFRAG
++#define IPV6_DONTFRAG 14
++#endif
+ #define MAX_SOCKETS 512
+ #define MAX_LOG_LINES 2000
+ 
+@@ -28,7 +53,7 @@
+ static HANDLE log_file = INVALID_HANDLE_VALUE;
+ static SRWLOCK log_lock = SRWLOCK_INIT;
+ static SRWLOCK socket_lock = SRWLOCK_INIT;
+-static struct { SOCKET socket; int sends, receives; } sockets[MAX_SOCKETS];
++static struct { SOCKET socket; int family; } sockets[MAX_SOCKETS];
+ 
+ static void *original_proc(const char *name)
+ {
+@@ -128,7 +153,7 @@
+     if (log_lines < MAX_LOG_LINES)
+     {
+         if (log_file == INVALID_HANDLE_VALUE)
+-            log_file = CreateFileA("fh5-netfix.log", FILE_APPEND_DATA,
++            log_file = CreateFileA("fh6-netfix.log", FILE_APPEND_DATA,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+         if (log_file != INVALID_HANDLE_VALUE)
+@@ -142,7 +167,7 @@
+ 
+ #define LOG_BUFFER(name) char name##_bytes[1024]; log_buffer name = { name##_bytes, name##_bytes, name##_bytes + 1000 }
+ 
+-static void remember_socket(SOCKET socket)
++static void remember_socket(SOCKET socket, int family)
+ {
+     int i, free_slot = -1;
+     AcquireSRWLockExclusive(&socket_lock);
+@@ -154,7 +179,7 @@
+     if (free_slot >= 0)
+     {
+         sockets[free_slot].socket = socket;
+-        sockets[free_slot].sends = sockets[free_slot].receives = 0;
++        sockets[free_slot].family = family;
+     }
+     ReleaseSRWLockExclusive(&socket_lock);
+ }
+@@ -169,6 +194,16 @@
+     return found;
+ }
+ 
++static int socket_family(SOCKET socket)
++{
++    int i, family = -1;
++    if (!socket || socket == INVALID_SOCKET) return -1;
++    AcquireSRWLockShared(&socket_lock);
++    for (i = 0; i < MAX_SOCKETS; i++) if (sockets[i].socket == socket) { family = sockets[i].family; break; }
++    ReleaseSRWLockShared(&socket_lock);
++    return family;
++}
++
+ static void forget_socket(SOCKET socket)
+ {
+     int i;
+@@ -188,7 +223,7 @@
+ {
+     LOG_BUFFER(buffer);
+     if (!(type == SOCK_DGRAM || (type == 0 && protocol == IPPROTO_UDP))) return;
+-    if (socket != INVALID_SOCKET) remember_socket(socket);
++    if (socket != INVALID_SOCKET) remember_socket(socket, family);
+     begin_line(&buffer, return_address); put_string(&buffer, function);
+     put_string(&buffer, " af="); put_integer(&buffer, family);
+     put_string(&buffer, " type="); put_integer(&buffer, type);
+@@ -258,15 +293,18 @@
+     ORIGINAL(function, "setsockopt");
+     int result = ((int (WSAAPI *)(SOCKET,int,int,const char*,int))function_proc)(socket, level, option, value, length);
+     int original_result = result, alternate = -2;
+-    if (result != 0 && level == IPPROTO_IP && enabled())
++    int family;
++    if (result != 0 && level == IPPROTO_IP && enabled() &&
++        ((family = socket_family(socket)) == AF_INET6 || family == AF_UNSPEC))
+     {
+         DWORD original_error = GetLastError();
+-        if (original_error == WSAEINVAL || original_error == WSAENOPROTOOPT)
++        if (original_error == WSAEINVAL || original_error == WSAENOPROTOOPT || original_error == WSAEOPNOTSUPP)
+         {
+             int ipv6_option = option == IP_TTL ? IPV6_UNICAST_HOPS :
+                               option == IP_MULTICAST_TTL ? IPV6_MULTICAST_HOPS :
+                               option == IP_MULTICAST_LOOP ? IPV6_MULTICAST_LOOP :
+-                              option == IP_TOS ? IPV6_TCLASS : -1;
++                              option == IP_TOS ? IPV6_TCLASS :
++                              option == IP_DONTFRAGMENT ? IPV6_DONTFRAG : -1;
+             if (ipv6_option >= 0)
+                 alternate = ((int (WSAAPI *)(SOCKET,int,int,const char*,int))function_proc)
+                     (socket, IPPROTO_IPV6, ipv6_option, value, length);

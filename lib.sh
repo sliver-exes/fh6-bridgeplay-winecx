@@ -45,6 +45,8 @@ MGF_BOOST_SHA=ce9dd6b0d23f350529cbc428a8b96c5b99ad7ba548ee750af82636671d118672
 
 # Built files shipped in bin/ (also listed in bin/SHA256SUMS). Proxy: sliver-exes/fh5-d3dmetal-fix @ ebd20db.
 PROXY_SHA=c5d48ab9de44e201fc1534a5d1d446055c5a0ecd066c85e1131702d9ad9115f7
+# Pacer proxy: MacGameFix main @ ef19e41 (PR #89), d3d12-fh6.dll. Installed with ./install.sh --pacer.
+PACER_SHA=4028c3f34c3b8acb97143665660591347a34ceb1f9249e460c5bba74d8a8e35e
 APD12_SHA=af5db5201dfc2bb98febecafb69239a99c5b4a6b0bd3b1b0e6b24f2b75cbcbb5
 # Experimental ntdll: stock WineCX 11.17 x86_64-windows/ntdll.dll -> unwind-patched.
 NTDLL_STOCK_SHA=4573d521671a48212670e7543aa9ebf0921e383dada69477f677f435df2bef5a

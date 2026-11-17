@@ -108,14 +108,18 @@ step "Game config"
 if [ -f "$GAMEFIX" ] && grep -q '^DLLOVERRIDES=d3d12=n,b' "$GAMEFIX"; then pass "gamefixes/$APPID.conf has DLLOVERRIDES=d3d12=n,b"
 else fail "gamefixes/$APPID.conf missing or without DLLOVERRIDES=d3d12=n,b"; fi
 grep -q '^D3DM_ENABLE_METALFX=0' "$GAMEFIX" 2>/dev/null && pass "gamefixes/$APPID.conf has D3DM_ENABLE_METALFX=0" \
-  || wrn "gamefixes/$APPID.conf lacks D3DM_ENABLE_METALFX=0 (Apple Neural Engine errors, hang after a resolution change)"
+  || wrn "gamefixes/$APPID.conf lacks D3DM_ENABLE_METALFX=0 (DLSS/MetalFX failed on our test Mac: Apple Neural Engine errors, hang or FHC20 crash)"
 
 step "Game, prefix, Steam mapping"
 if find_library; then
   pass "game library: $LIB"
   [ -f "$GAME/forzahorizon6.exe" ] && pass "forzahorizon6.exe found" || fail "forzahorizon6.exe missing in $GAME"
-  [ "$(sha "$GAME/d3d12.dll")" = "$PROXY_SHA" ] && pass "proxy d3d12.dll in the game folder (sha256 $(printf %.8s "$PROXY_SHA")...)" \
-    || fail "proxy d3d12.dll missing or different in the game folder"
+  case $(sha "$GAME/d3d12.dll") in
+    "$PROXY_SHA") pass "proxy d3d12.dll in the game folder (sha256 $(printf %.8s "$PROXY_SHA")...)" ;;
+    "$PACER_SHA") pass "pacer proxy d3d12.dll (MacGameFix d3d12-fh6, sha256 $(printf %.8s "$PACER_SHA")...) in the game folder"
+                  info "pacer is on only with NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER=40 in the launch options; proof: C:\\mgf\\fh6-pacer-<pid>.log in the prefix" ;;
+    *) fail "proxy d3d12.dll missing or different in the game folder" ;;
+  esac
   if [ -f "$PFX/user.reg" ]; then
     case $(pfx_arch) in
       x86_64)  pass "Wine prefix is x86-64 (Rosetta)" ;;

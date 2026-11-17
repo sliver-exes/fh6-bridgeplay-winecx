@@ -1,6 +1,6 @@
 #!/bin/sh
 # Undoes ./install.sh (main branch): removes whichever route is installed (the MGF runner copy, bridge folder and Steam
-# tool, or the plain FH WineCX ones), the proxy d3d12.dll in the game folder and the prefix additions, and restores Steam's previous tool
+# tool, or the plain FH WineCX ones), the proxy d3d12.dll (plain or pacer) in the game folder and the prefix additions, and restores Steam's previous tool
 # choice for Forza Horizon 6. If install moved an arm64 (FEX) prefix aside, it is put back (the Rosetta prefix
 # is kept as compatdata/2483190.rosetta); nothing is ever deleted from a prefix.
 # Stock Bridgeplay runners, game files and saves are not touched.
@@ -41,7 +41,7 @@ if [ -f "$GAMEFIX" ] && grep -q 'load the d3d12 proxy from the game folder' "$GA
 fi
 
 if find_library; then
-  if [ -f "$GAME/d3d12.dll" ] && [ "$(sha "$GAME/d3d12.dll")" = "$PROXY_SHA" ]; then
+  if [ -f "$GAME/d3d12.dll" ] && { [ "$(sha "$GAME/d3d12.dll")" = "$PROXY_SHA" ] || [ "$(sha "$GAME/d3d12.dll")" = "$PACER_SHA" ]; }; then
     rm -f "$GAME/d3d12.dll"; ok "proxy d3d12.dll removed from the game folder"
   fi
   rm -f "$PFX/drive_c/windows/system32/apd12.dll"
