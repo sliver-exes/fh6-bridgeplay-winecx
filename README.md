@@ -107,7 +107,7 @@ emptied) becomes too short to notice. It loads Apple's real D3DMetal as `apd12.d
 **2. Steam launch options.** Forza Horizon 6 > Properties > General > Launch Options. Paste this whole line:
 
 ```
-BRIDGEPLAY_DISABLE_HIDRAW=1 NOTPROTON_PERF_OVERLAY=summary NOTPROTON_ENV_WINENCPU=8 D3DM_MAX_FPS=60 NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER=40 NOTPROTON_ROSETTA_TRAP_BOOST=1 %command%
+BRIDGEPLAY_DISABLE_HIDRAW=1 NOTPROTON_PERF_OVERLAY=summary NOTPROTON_ENV_WINENCPU=8 D3DM_MAX_FPS=40 NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER=50 NOTPROTON_ROSETTA_TRAP_BOOST=1 %command%
 ```
 
 **Important, on Bridgeplay: the pacer setting needs the `NOTPROTON_ENV_` prefix.** Bridgeplay (like NotProton) starts
@@ -120,9 +120,10 @@ with MacGameFix installed it may differ.) The same rule applies to any other var
 inside the game's Wine prefix (`~/Library/Application Support/Steam/steamapps/compatdata/2483190/pfx/drive_c/mgf/`)
 and gets a new line every 10 seconds while you play. No file means the pacer is not on.
 
-What the options do: `D3DM_MAX_FPS=60` caps at the screen's 60 Hz. The pacer value (1 to 100) is how much of the time the pacer thread works;
-40 to 50 was best in MacGameFix's tests and 40 is what we played. MacGameFix's guide uses `D3DM_MAX_FPS=48` on ProMotion
-screens; on a fixed 60 Hz screen a 48 cap judders, so use 60. `NOTPROTON_ENV_WINENCPU=8` tells the game it has 8 CPU cores. `NOTPROTON_ROSETTA_TRAP_BOOST=1` is the
+What the options do: `D3DM_MAX_FPS=40` caps the frame rate. On a fanless 16 GB Air a 40 cap leaves CPU time for the
+pacer and runs cooler; use 60 (the screen's 60 Hz) on a Mac with fans. MacGameFix's guide uses `D3DM_MAX_FPS=48` on
+ProMotion screens; on a fixed 60 Hz screen a 48 cap judders. The pacer value (1 to 100) is how much of the time the
+pacer thread works, not a frame rate. 50 was the best balance in our tests on the M5 Air (see "Pacer tests" below). `NOTPROTON_ENV_WINENCPU=8` tells the game it has 8 CPU cores. `NOTPROTON_ROSETTA_TRAP_BOOST=1` is the
 trap boost (the MGF tool on this branch already has it on by default, so it changes nothing here). On a Mac with fans,
 MacGameFix also has a fan setting (`MGF_FANS=max`); it does nothing on a fanless MacBook Air.
 
@@ -216,7 +217,7 @@ question. A copy of the prefix's `user.reg` from before the change is kept as `u
 | GPU identity | NVIDIA RTX 4070 (vendor 4318, device 10118) | same |
 | Audio | Wine 11.17 `winecoreaudio.drv` + Highball patch 0057 | not re-tested |
 | Online | not covered | works with the x86-64 `ws2_32` netfix (see "Online play") |
-| Result | Smooth, 1-second freezes cut to about 10%, dialogue works (confirmed by the user) | Smooth at a steady 40 to 60 fps; FHE21 at start-up in about half of launches; hitches of 0.3 to 0.8 s every 30 to 60 s |
+| Result | Smooth, 1-second freezes cut to about 10%, dialogue works (confirmed by the user) | Smooth with a 40 fps cap and pacer 50; FHE21 at start-up in about half of launches; hitches of 0.3 to 1 s every 20 to 60 s, growing with heat and swap |
 
 **Not verified:** the pacer (`./install.sh --pacer`) on this branch's `crossover-MGF-winecx-11.17` runner copy. It was
 tested on the Highball r32 runner. CrossOver 26.3.0 ships an older D3DMetal (3.0): do not use it for this route.
@@ -241,8 +242,24 @@ Bridgeplay's CrossOver-based 11.17 runner; that combination is what we tested.
 - **FHE21 at start-up (about half of launches).** Usually during the intro drive. The log shows a 60-second wait on a
   critical section, then `AGX: exceeded compiled variants footprint limit` (Apple's GPU driver has a limit on the number
   of compiled shader variants). Starting the game again usually gets past it. The FEX route on `main` does not have it.
-- **Short hitches in play.** 0.3 to 0.8 seconds every 30 to 60 seconds on 16 GB (memory pressure plus shader
-  compiles).
+  The AGX line itself is harmless: Apple's driver prints it once per process when its bookkeeping of live shader
+  variants (about 13,100) fills up, and there is no setting to raise it. The crash is more likely the game timing out
+  while the first shader compiles take very long. **Warm caches help**: each launch compiles fewer shaders (D3DMetal's
+  `d3dm` cache and Apple's `com.apple.metal` cache under `/var/folders/.../C/`), so FHE21 gets rarer. Do not clean
+  either cache. `AGX_FORCE_OPTSIZE=1` was tried and did not help.
+- **Metal 3 / no ray tracing workaround (M5).** Adding `D3DM_MTL4=0` and `D3DM_SUPPORT_DXR=0` to
+  `gamefixes/2483190.conf` made in-world play stable for us. It did not stop FHE21 at start-up. Optional; not set by
+  `install.sh`.
+- **Short hitches in play.** 0.3 to 1 second every 20 to 60 seconds on a 16 GB Air. They grow over a long session.
+  Main causes: swap (we saw 6.4 GB of 7 GB swap used after days of uptime, and the game held at about 30 fps), heat on
+  a fanless Mac, and Rosetta's translation store flush (see "Pacer tests"). Restart the Mac before playing and keep
+  only Steam open.
+- **Pacer tests (M5 Air, 2026-11-17/18).** On this Mac Rosetta pauses the game for 0.3 to 0.4 s every 16 to 19 s
+  when its translation store is flushed; the pacer prevents that by keeping Rosetta busy. In-game sweep: 50 had the
+  fewest and shortest stops; 20 and 65 were worse. Raising the value live from 50 to 65 during a session changed
+  nothing. In a synthetic bench (based on MacGameFix's `trapfreeze.c`) the pacer needs about 2,500 small functions per
+  second, about 45% of one core, whatever the rhythm; finer slicing, a fixed rate, efficiency-core QoS and an adaptive
+  pacer did not beat MacGameFix's design reliably. Values like 48 or 49 vs 50 make no measurable difference.
 - The once-a-second freezes are cut to about a tenth, not removed. For none at all use the FEX route on `main`.
 - The MGF `run` script is pinned to Bridgeplay 0.7.64's. A newer Bridgeplay will not update it (the plain tool is a
   copy of Bridgeplay's and follows it after a re-run of `./install.sh`).
@@ -319,8 +336,8 @@ applied, as `<NAME> from launch options` or `<NAME> default`. An empty value (`N
 | `WINEDLLOVERRIDES` or `BRIDGEPLAY_DLLOVERRIDES` | Your own DLL overrides. They are **added after** everything the tool and the gamefix conf set, and Wine takes the last entry **per DLL**, so yours win for the DLLs you name and every other default stays | none | `BRIDGEPLAY_DLLOVERRIDES="concrt140=b" %command%` |
 | `BRIDGEPLAY_RAW_CONTROLLERS` | Games read gamepads directly (needed because macOS Steam has no virtual gamepad). `0` = stock behaviour (pads Steam Input claims are hidden from the game) | `1` | `BRIDGEPLAY_RAW_CONTROLLERS=0 %command%` |
 | `BRIDGEPLAY_BACKEND` | Graphics backend: `dxmt`, `dxvk`, `wined3d` or `d3dmetal` (this branch is tested with `d3dmetal` only) | `d3dmetal` (from `gamefixes/2483190.conf`) | `BRIDGEPLAY_BACKEND=d3dmetal %command%` |
-| `D3DM_MAX_FPS` | D3DMetal frame rate cap. Use your screen's refresh rate: 60 on a fixed 60 Hz screen | unset (no cap) | `D3DM_MAX_FPS=60 %command%` |
-| `NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER` | Frame rate target of the pacer (needs `./install.sh --pacer`). **Needs the `NOTPROTON_ENV_` prefix on Bridgeplay**; without it the game never sees it. 40 on a 60 Hz screen; MacGameFix suggests 48 for ProMotion | unset (pacer off) | `NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER=40 %command%` |
+| `D3DM_MAX_FPS` | D3DMetal frame rate cap. 40 on a fanless 16 GB Air (leaves CPU for the pacer), 60 on a 60 Hz Mac with fans | unset (no cap) | `D3DM_MAX_FPS=60 %command%` |
+| `NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER` | How much of the time the pacer thread works, 1 to 100 (needs `./install.sh --pacer`). **Needs the `NOTPROTON_ENV_` prefix on Bridgeplay**; without it the game never sees it. 40 to 50; 50 was best on the M5 Air | unset (pacer off) | `NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER=50 %command%` |
 | `NOTPROTON_ENV_WINENCPU` | CPU core count the game sees | unset | `NOTPROTON_ENV_WINENCPU=8 %command%` |
 | `NOTPROTON_PERF_OVERLAY` | Notproton/Bridgeplay on-screen performance summary | unset (off) | `NOTPROTON_PERF_OVERLAY=summary %command%` |
 | `D3DM_ENABLE_METALFX` | D3DMetal MetalFX upscaling. Off because it caused Apple Neural Engine errors, hangs and an FHC20 crash on our test Mac | `0` (from the gamefix conf) | `D3DM_ENABLE_METALFX=1 %command%` |
@@ -401,7 +418,7 @@ and prints where the logs are.
 | Apple Neural Engine errors, a hang, or an FHC20 "Video Card Crash" | MetalFX/DLSS is on. `D3DM_ENABLE_METALFX=0` must be in `gamefixes/2483190.conf` (`./doctor.sh` checks it) and you must not have `D3DM_ENABLE_METALFX=1` in the launch options. Use FSR. |
 | FHE21 at start-up, log says `AGX: exceeded compiled variants footprint limit` | Apple GPU driver limit. Start the game again; it usually passes. |
 | Stuck at 30 fps | `PresentInterval` is 2 in `UserConfigSelections`; set it to 0 with the game closed (see "Recommended setup"). |
-| No `fh6-pacer-<number>.log` in the prefix's `C:\mgf` | The pacer is not on. Use `NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER=40` (with the prefix) and `./install.sh --pacer`. |
+| No `fh6-pacer-<number>.log` in the prefix's `C:\mgf` | The pacer is not on. Use `NOTPROTON_ENV_MGF_FH6_ROSETTA_PACER=50` (with the prefix) and `./install.sh --pacer`. |
 | Black screen for about 2 minutes after an off-road reset | Streaming on a 16 GB Mac. Wait; see the tips above. |
 | A freeze of about one second, now and then | Cut to about 10% by MGF, not removed. Use the FEX route on `main` for none. |
 | Trap boost misbehaves | Create `mgf-trap-boost.off` in the MGF tool folder. |
